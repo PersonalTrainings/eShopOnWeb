@@ -2,14 +2,16 @@ version: '3.4'
 
 services:
   eshopwebmvc:
-    image: ${DOCKER_REGISTRY-}eshopwebmvc
+    platform: linux/amd64
+    image: cloudxeshoponwebregistry.azurecr.io/eshopwebmvc
     build:
       context: .
       dockerfile: src/Web/Dockerfile
     depends_on:
       - "sqlserver"
   eshoppublicapi:
-    image: ${DOCKER_REGISTRY-}eshoppublicapi
+    platform: linux/amd64
+    image: cloudxeshoponwebregistry.azurecr.io/eshoppublicapi
     build:
       context: .
       dockerfile: src/PublicApi/Dockerfile
