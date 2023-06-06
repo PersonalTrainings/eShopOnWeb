@@ -1,13 +1,27 @@
-﻿using System.Linq;
+﻿using System;
+using System.Linq;
+using System.Net.Http;
 using System.Threading.Tasks;
+using System.Collections.Generic;
 using Ardalis.GuardClauses;
 using Microsoft.eShopWeb.ApplicationCore.Entities;
 using Microsoft.eShopWeb.ApplicationCore.Entities.BasketAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Entities.OrderAggregate;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
 using Microsoft.eShopWeb.ApplicationCore.Specifications;
+using Azure.Messaging.ServiceBus;
 
 namespace Microsoft.eShopWeb.ApplicationCore.Services;
+
+public class OrderItemDetails
+{
+    public int OrderId { get; set; }
+    public int Quantity { get; set; }
+    public string BuyerId { get; set; } = "";
+    public Address? ShipToAddress { get; set; }
+    public IReadOnlyCollection<OrderItem>? OrderItems { get; set; }
+    public decimal FullPrice { get; set; }
+}
 
 public class OrderService : IOrderService
 {
@@ -25,6 +39,66 @@ public class OrderService : IOrderService
         _uriComposer = uriComposer;
         _basketRepository = basketRepository;
         _itemRepository = itemRepository;
+    }
+
+    public async Task ReserveOrderAsync(OrderItemDetails orderItemData)
+    {
+        const string ServiceBusConnectionString = "{service_bus_connection_string}";
+        const string QueueName = "orderitemsmessages";
+
+        await using var client = new ServiceBusClient(ServiceBusConnectionString);
+
+        await using ServiceBusSender sender = client.CreateSender(QueueName);
+        try
+        {
+            string messageBody = orderItemData.ToJson();
+            var message = new ServiceBusMessage(messageBody);
+            Console.WriteLine($"Sending message: {messageBody}");
+            await sender.SendMessageAsync(message);
+        }
+        catch (Exception exception)
+        {
+            Console.WriteLine($"{DateTime.Now} :: Exception: {exception.Message}");
+        }
+        finally
+        {
+            await sender.DisposeAsync();
+            await client.DisposeAsync();
+        }
+    }
+
+    public async Task ProcessOrderDeliveryAsync(OrderItemDetails orderItemData)
+    {
+        using var client = new HttpClient();
+        client.BaseAddress = new Uri("{process_order_delivery_fn_app_url}");
+
+        var requestBody = new StringContent(orderItemData.ToJson(), System.Text.Encoding.UTF8, "application/json");
+        var response = await client.PostAsync("api/DeliveryOrderProcessor", requestBody);
+
+        if (response.IsSuccessStatusCode)
+        {
+            Console.WriteLine("Process order delivery is succeeded");
+        }
+        else
+        {
+            Console.WriteLine($"Failed with status code {response.StatusCode}");
+        }
+    }
+
+    public async Task StartOrderProcessAsync(Order order)
+    {
+        var orderItemData = new OrderItemDetails
+        {
+            OrderId = order.Id,
+            Quantity = order.OrderItems.Count,
+            BuyerId = order.BuyerId,
+            ShipToAddress = order.ShipToAddress,
+            OrderItems = order.OrderItems,
+            FullPrice = order.Total()
+        };
+
+        await this.ReserveOrderAsync(orderItemData);
+        await this.ProcessOrderDeliveryAsync(orderItemData);
     }
 
     public async Task CreateOrderAsync(int basketId, Address shippingAddress)
@@ -49,5 +123,6 @@ public class OrderService : IOrderService
         var order = new Order(basket.BuyerId, shippingAddress, items);
 
         await _orderRepository.AddAsync(order);
+        await this.StartOrderProcessAsync(order);
     }
 }

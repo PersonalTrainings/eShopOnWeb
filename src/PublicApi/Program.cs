@@ -5,6 +5,7 @@ using BlazorShared;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Identity;
+using Azure.Identity;
 using Microsoft.eShopWeb;
 using Microsoft.eShopWeb.ApplicationCore.Constants;
 using Microsoft.eShopWeb.ApplicationCore.Interfaces;
@@ -30,6 +31,12 @@ builder.Services.AddEndpoints();
 // Use to force loading of appsettings.json of test project
 builder.Configuration.AddConfigurationFile("appsettings.test.json");
 builder.Logging.AddConsole();
+
+if (builder.Environment.IsProduction())
+{
+    Uri vaultUri = new Uri($"https://{builder.Configuration["VaultName"]}.vault.azure.net/");
+    builder.Configuration.AddAzureKeyVault(vaultUri, new DefaultAzureCredential());
+}
 
 Microsoft.eShopWeb.Infrastructure.Dependencies.ConfigureServices(builder.Configuration, builder.Services);
 
